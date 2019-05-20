@@ -1,0 +1,324 @@
+// Chordpeggio, by rrc2soft. v1.1
+// AU Parameter User 0: Change current preset
+
+@Description 
+Chordpeggio v1.1 by rrc2soft
+Input four notes using the keyboard, which (with user led not flashing) will be ordered from lower to higher.
+Then, every new bar and for every note, the chordpeggio will play as many notes as their respective NPM (notes per measure).
+Shift knobs change when the notes are played. The Size knob indicates the duration of the notes. Finally, use the Random knob to give the chordpeggio a chance to evolve.
+Use the Left Pads to choose the current preset.
+Use SHIFT to change input mode (OFF: order notes, ON: do not order notes).
+@End
+
+@OnLoad 
+  //VARIABLES
+  // Initialize array of temporal notes, to be saved to the ordered notes
+  FillArray tmpNotes, 0
+  FillArray tmpVelocity, 0
+  FillArray tmpChannel, 0
+  tmpNotesStored = 0
+  // Initialize the current preset
+  // Only if unassigned
+  if Unassigned preset
+    preset = 0
+    pFactor = 0
+    order = YES
+    FillArray pKnobs, 64
+    FillArray pX, 64
+    FillArray pY, 64
+  endif
+  // Initialize arrays used in the app 
+  // Those with *preset depend on the preset, and need to use
+  //   pFactor to access the array.
+  // The others are calculated from the knobs, and there is no 
+  //  need to use pFactor.
+  // Only if unassigned
+  if Unassigned notesOrderedPreset
+    FillArray notesOrderedPreset, 0 // ordered notes,[0]low,[3]high
+    FillArray velocityOrderedPreset, 0 // velocity of ordered notes
+    FillArray channelOrderedPreset, 0 // channel of ordered notes
+    FillArray notesOrderedFullPreset, NO
+    FillArray knobValue, 0 // measures where notes are placed
+    FillArray knobVariance, 0 // shift knobValues around
+    FillArray barVariance, 0 // knobVariance every measure
+    noteSize = 1 // overall size of the note (1 = 100%)
+    rndFactor = 0 // Chance (rnd*3) to change the Variance
+  endif
+  
+  //GUI - Basic
+  // We will actually update the GUI labels every 125ms
+  //...if needed, of course
+  LabelKnobs {Chordpeggio Parameters}
+  LabelXY {X (Size) Y (Randomness Factor)} 
+  LabelPads {Presets}
+  SetShortName {ChArp}
+  
+  //OPERATIONS
+  SetMetroPPQN 4
+  
+  // FINAL (Timer for GUI and changes to internal arrays)
+  // Internal variables will be updated in the Timer
+  // ...and yes, this is a hack to enable a single function call :-P and a couple of things more
+  SetTimerInterval 125
+  StartTimer 
+  updatePRESET = YES
+@End  
+
+@OnTimer 
+  // In “order notes” mode, flash the LEDs
+  if not order
+    FlashUserLed 
+  endif
+  
+  // First, in case of preset change, we change everything
+  if (updatePRESET)
+    for _it = 0 to 3
+      LatchPad _it, (_it = preset)
+    endfor 
+    for _it = 0 to 9
+      SetKnobValue _it, pKnobs[pFactor + _it]
+    endfor
+    SetXYValues pX[preset], pY[preset]
+    updateXY = YES
+    updateKNOB = YES
+    // This task is done
+    updatePRESET = NO
+  endif
+  // We will update the internal arrays, variables and GUI here.
+  // This script does not play live notes, thus we can
+  //   do this to improve script readability.
+  if (updateXY)
+    // noteSize
+    _knob = GetKnobValue 4
+    if (_knob < 60)
+      noteSize = 6 - RoundDown(_knob / 10)
+      noteSize = (10 - noteSize) * 0.1
+    elseif (_knob > 68)
+      noteSize = 1 + RoundDown((_knob - 69) / 10)
+      noteSize = (10 - noteSize) * 0.1
+    else
+      noteSize = 1
+    endif
+    // rndFactor
+    _knob = GetKnobValue 9
+    if (_knob < 60)
+      rndFactor = 6 - RoundDown(_knob / 10)
+    elseif (_knob > 68)
+      rndFactor = 1 + RoundDown((_knob - 69) / 10)
+    else
+      rndFactor = 0
+    endif
+    // noteSize GUI
+    if (noteSize = 0.9)
+      LabelKnob 4, {Size: 0.9}
+    elseif (noteSize = 0.8)
+      LabelKnob 4, {Size: 0.8}
+    elseif (noteSize = 0.7)
+      LabelKnob 4, {Size: 0.7}
+    elseif (noteSize = 0.6)
+      LabelKnob 4, {Size: 0.6}
+    elseif (noteSize = 0.5)
+      LabelKnob 4, {Size: 0.5}
+    elseif (noteSize = 0.4)
+      LabelKnob 4, {Size: 0.4}
+    else
+      LabelKnob 4, {Size:}, noteSize
+    endif
+    // rndFactor GUI
+    LabelKnob 9, {Rnd:}, rndFactor
+    // No more updates
+    updateXY = NO
+  endif
+  if (updateKNOB)
+    // knobValue, var and GUI
+    for _curr = 0 to 3
+      _knob = GetKnobValue _curr
+      if (_knob <= 32)
+        LabelKnob _curr , {NPM: 1} 
+        knobValue[_curr] = 16
+      elseif (_knob <= 64)
+        LabelKnob _curr , {NPM: 2} 
+        knobValue[_curr] = 8
+      elseif (_knob > 96)
+        LabelKnob _curr , {NPM: 4} 
+        knobValue[_curr] = 4
+      else
+        LabelKnob _curr , {NPM: 3}
+        knobValue[_curr] = 6
+      endif
+    endfor
+    // knobVariance, barVariance, var and GUI
+    for _curr = 5 to 8
+      _knob = GetKnobValue _curr
+      if (_knob <= 20)
+        LabelKnob _curr , {Shift: -3} 
+        knobVariance[_curr - 5] = -3
+      elseif (_knob <= 40)
+        LabelKnob _curr , {Shift: -2} 
+        knobVariance[_curr - 5] = -2
+      elseif (_knob <= 60)
+        LabelKnob _curr , {Shift: -1} 
+        knobVariance[_curr - 5] = -1
+      elseif (_knob >= 108)
+        LabelKnob _curr , {Shift: 3} 
+        knobVariance[_curr - 5] = 3
+      elseif (_knob > 88)
+        LabelKnob _curr , {Shift: 2} 
+        knobVariance[_curr - 5] = 2
+      elseif (_knob > 68)
+        LabelKnob _curr , {Shift: 1} 
+        knobVariance[_curr - 5] = 1
+      else
+        LabelKnob _curr , {Shift: 0}
+        knobVariance[_curr - 5] = 0
+      endif
+      barVariance[_curr - 5] = knobVariance[_curr - 5]
+    endfor
+    // No more updates
+    updateKNOB = NO
+  endif
+@End
+
+@OnMidiNoteOn 
+  if (tmpNotesStored = 4)
+    // Start from the beginning storing notes
+    tmpNotesStored = 0
+  endif
+  if (tmpNotesStored < 4)
+    // Save new note
+    tmpNotes[tmpNotesStored] = MIDINote
+    tmpVelocity[tmpNotesStored] = MIDIVelocity
+    tmpChannel[tmpNotesStored] = MIDIChannel 
+    tmpNotesStored = tmpNotesStored + 1
+    if (tmpNotesStored = 4)
+      if order
+        // Copy the notes to the notesOrderedArray, ordered
+        for _itOrd = 3 to 0
+          _highestNote = 0
+          _index = 0
+          for _itTmp = 0 to 3
+            if (tmpNotes[_itTmp] >= _highestNote)
+              _index = _itTmp
+              _highestNote = tmpNotes[_itTmp]
+              _highestNoteVel = tmpVelocity[_itTmp]
+              _highestNoteCh = tmpChannel[_itTmp]
+            endif
+          endfor
+          notesOrderedPreset[pFactor + _itOrd] = _highestNote
+          velocityOrderedPreset[pFactor + _itOrd] = _highestNoteVel
+          channelOrderedPreset[pFactor + _itOrd] = _highestNoteCh
+          tmpNotes[_index] = 0
+        endfor
+      else
+        // Do not order the notes
+        for _itOrd = 0 to 3
+          _highestNote = tmpNotes[_itOrd]
+          _highestNoteVel = tmpVelocity[_itOrd]
+          _highestNoteCh = tmpChannel[_itOrd]
+          notesOrderedPreset[pFactor + _itOrd] = _highestNote
+          velocityOrderedPreset[pFactor + _itOrd] = _highestNoteVel
+          channelOrderedPreset[pFactor + _itOrd] = _highestNoteCh
+        endfor
+      endif
+      // Now we have all the notes we need
+      notesOrderedFullPreset[preset] = YES
+    endif
+  endif
+@End
+
+@OnMetroPulse
+  if notesOrderedFullPreset[preset] = YES
+    for _it = 0 to 3
+      _playNote = NO
+      if CurrentMetroPulse = 0
+        // Play the note in measure 0
+        // Also, change the bar variance according to random
+        barVariance[_it] = knobVariance[_it]
+        _playNote = YES
+        if ((Random 0, 99) < (rndFactor * 3))
+          barVariance[_it] = barVariance[_it] + ((Random 0, 4) - 2)
+          barVariance[_it] = Clip barVariance[_it], -3, 3
+        endif
+      else
+        // Play the note only on its corresponding pulse
+        _pulse = CurrentMetroPulse - barVariance[_it]
+        if _pulse > 0 and _pulse < 16
+          if _pulse % knobValue[_it] = 0
+            _playNote = YES
+          endif
+        endif
+      endif
+      if (_playNote = YES)
+        // Play the note for a duration changed by noteSize
+        _dur = knobValue[_it] * noteSize
+        if (_dur + CurrentMetroPulse >= 16)
+          _dur = 16 - CurrentMetroPulse 
+        endif
+        _note = notesOrderedPreset[pFactor + _it]
+        _vel = velocityOrderedPreset[pFactor + _it]
+        _ch = channelOrderedPreset[pFactor + _it]
+        SendMIDINoteOn _ch, _note, _vel, 0
+        SendMIDINoteOff _ch, _note, 0, (_dur * (QuarterNote / 4)) - 0.1
+      endif
+    endfor
+  endif
+@End
+
+@OnKnobChange 
+  // Update preset Value
+  pKnobs[LastKnob + pFactor] = GetKnobValue LastKnob 
+  // Change both labels and internal values
+  updateKNOB = YES
+  // Special case with knobs 4 and 9: update XY
+  _curr = LastKnob
+  if (_curr = 4 or _curr = 9)
+    // Update XY
+    SetXYValues (GetKnobValue 4), (GetKnobValue 9)
+    pX[preset] = GetKnobValue 4
+    pY[preset] = GetKnobValue 9
+    // Change both labels and internal values
+    updateXY = YES
+  endif
+@End
+
+@OnXYChange 
+  // Special case: Update the knobs
+  SetKnobValue 4, GetXValue 
+  SetKnobValue 9, GetYValue  
+  pKnobs[pFactor + 4] = GetXValue 
+  pKnobs[pFactor + 9] = GetYValue
+  // Update preset value
+  pX[preset] = GetXValue 
+  pY[preset] = GetYValue 
+  // Change both labels and internal values
+  updateKNOB = YES
+  updateXY = YES
+@End
+
+@OnPadDown 
+  // Change the current preset, updating AU parameter
+  preset = LastPad
+  pFactor = preset * 10
+  updatePRESET = YES
+  
+  SetAUParameter 0, preset * 32
+@End
+
+@OnShiftDown 
+  // Change order mode
+  order = not order
+@End
+
+@OnAUParameter 
+  // AU parameter User0: Change the presets
+  // As User0 is 0-127, we will consider intervals of 32
+  if (LastAUParameter = 0)
+    _newPreset = RoundDown ((GetAUParameter LastAUParameter) / 32)
+    if (_newPreset >= 0 and _newPreset <= 3 and _newPreset <> preset)
+      // Change preset
+      preset = _newPreset
+      pFactor = preset * 10
+      updatePRESET = YES
+    endif
+  endif
+@End
