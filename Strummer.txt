@@ -1,0 +1,276 @@
+// Strummer, by rrc2soft. v1.1
+// AU Parameter User 0: Change current preset
+
+@Description 
+Strummer v1.1 by rrc2soft
+Set a strumming pattern using the knobs, starting from the first knob.
+Input four notes using the keyboard, which (with user LED not flashing) will be ordered from lower to higher.
+Then, every new bar the strummer will play the strumming pattern.
+Use the XY pad to change the strumming speed and velocity.
+Use the Left Pads to choose the current preset.
+Use SHIFT to change input mode (ON: order notes, OFF: do not order notes).
+@End
+
+@OnLoad 
+  //GUI - Basic
+  // We will actually update the GUI labels every 125ms
+  //...if needed, of course
+  LabelKnobs {Strumming Pattern}
+  LabelXY {X (Speed) Y (Velocity)}
+  LabelPads {Presets}
+  SetShortName {Strummer} 
+  
+  //VARIABLES
+  // Initialize array of temporal notes
+  FillArray tmpNotes, 0
+  FillArray tmpChannel, 0
+  tmpNotesStored = 0
+  // Initialize the current preset
+  // Only if unassigned
+  if Unassigned preset
+    preset = 0
+    pFactor = 0
+    order = YES
+    FillArray pKnobs, 64
+    FillArray pX, 64
+    FillArray pY, 64
+  endif
+  // Initialize array of ordered notes, [0] lower, [3] higher
+  // Only if unassigned
+  if Unassigned notesOrdered
+    FillArray notesOrdered, 0
+    FillArray notesOrderedFull, NO
+  endif
+  // Initialize array of strum directions and strum delay/vel
+  // Only if unassigned
+  if Unassigned knobValuesStored
+    FillArray knobValueStored, 0
+    FillArray knobSections, 0
+    FillArray strumDelayFactor, 0
+    FillArray strumVelFactor, 0.5
+  endif
+
+  // FINAL (Timer for GUI and changes to internal arrays)
+  // Internal variables will be updated in the Timer
+  // ...and yes, this is a hack to enable a single function call :-P and a couple of things more
+  SetTimerInterval 125
+  StartTimer 
+  updatePRESET = YES
+@End
+
+@OnTimer 
+  // In “order notes” mode, flash the LEDs
+  if not order
+    FlashUserLed 
+  endif
+  
+  // First, in case of preset change, we change everything
+  if (updatePRESET)
+    for _it = 0 to 3
+      LatchPad _it, (_it = preset)
+    endfor 
+    for _it = 0 to 9
+      SetKnobValue _it, pKnobs[pFactor + _it]
+    endfor
+    SetXYValues pX[preset], pY[preset]
+    updateGUI = YES
+    updateXY = YES
+    updateKNOB = YES
+    // This task is done
+    updatePRESET = NO
+  endif
+  // We will update the GUI labels here given the GUI values
+  // This saves code and reduce script complexity
+  if (updateGUI)
+    // Update knob labels
+    _knobEmptyFound = NO
+    for _it = 0 to 9
+      _knob = GetKnobValue _it
+      if (_knobEmptyFound = YES)
+        LabelKnob _it, {—}
+      elseif (_knob < 32)
+        LabelKnob _it , {Down2} 
+      elseif (_knob < 64)
+        LabelKnob _it , {Down} 
+      elseif (_knob = 64)
+        LabelKnob _it , {—} 
+        _knobEmptyFound = YES
+      elseif (_knob > 96)
+        LabelKnob _it , {Up2} 
+      else 
+        LabelKnob _it , {Up} 
+      endif
+    endfor
+    // No more updates
+    updateGUI = NO
+  endif
+  
+  // We also update the internal arrays here given the GUI.
+  // This script does not play live notes, thus we can
+  //   do this to improve script readability.
+  if (updateXY) 
+    // Update variables related to the XY pad
+    if (GetXValue < 4)
+      strumDelayFactor[preset] = 0
+    elseif (GetXValue < 64)
+      strumDelayFactor[preset] = GetXValue / 64
+    else
+      strumDelayFactor[preset] = (GetXValue / 64) * 5
+    endif
+    strumVelFactor[preset] = 0.5 + (GetYValue / 128)
+    // No more updates
+    updateXY = YES
+  endif
+  if (updateKNOB)
+    // Initialize array of strum directions, given the knobs
+    knobValueStored[preset] = 0
+    knobSections[preset] = 0
+    _it = 0
+    _knob = GetKnobValue _it
+    while (_it < 10 and _knob <> 64)
+      knobValue[pFactor + _it] = _knob
+      knobValueStored[preset] = knobValueStored[preset] + 1
+      if (_knob < 32 or _knob > 96)
+        knobSections[preset] = knobSections[preset] + 2
+      else
+        knobSections[preset] = knobSections[preset] + 1
+      endif
+      _it = _it + 1
+      _knob = GetKnobValue _it
+    endwhile
+    // No more updates
+    updateKNOB = NO
+  endif
+@End
+
+@OnMidiNoteOn 
+  if (tmpNotesStored = 4)
+    // Start from the beginning storing notes
+    tmpNotesStored = 0
+  endif
+  if (tmpNotesStored < 4)
+    // Save new note
+    tmpNotes[tmpNotesStored] = MIDINote 
+    tmpNotesStored = tmpNotesStored + 1
+    if (tmpNotesStored = 4)
+      if order
+        // Copy the notes to the notesOrderedArray, ordered
+        for _itOrd = 3 to 0
+          _highestNote = 0
+          _index = 0
+          for _itTmp = 0 to 3
+            if (tmpNotes[_itTmp] >= _highestNote)
+              _index = _itTmp
+              _highestNote = tmpNotes[_itTmp]        
+              _highestNoteCh = tmpChannel[_itTmp]
+            endif
+          endfor
+          notesOrdered[pFactor + _itOrd] = _highestNote
+          channelOrdered[pFactor + _itOrd] = _highestNoteCh
+          tmpNotes[_index] = 0
+        endfor
+      else
+        // Do not order the notes
+        for _itOrd = 0 to 3
+          _highestNote = tmpNotes[_itOrd]
+          _highestNoteCh = tmpChannel[_itOrd]
+          notesOrdered[pFactor + _itOrd] = _highestNote
+          channelOrdered[pFactor + _itOrd] = _highestNoteCh
+        endfor
+      endif
+      // Now we have all the notes we need
+      notesOrderedFull[preset] = YES  
+    endif
+  endif
+@End
+
+@OnNewBar 
+  // Loop over all knobs, choose the strum direction based on the values
+  // <32 down 2, <64 down, =64 no change, >64 up, >96 up 2
+  if (notesOrderedFull[preset] = YES and knobValueStored[preset] > 0)
+    _knobSectionCurrent = 0
+    msPerBar = (HostBeatsPerMeasure / (HostTempo / 60)) * 1000
+    msPerSection = msPerBar / knobSections[preset]
+    for _it = 0 to (knobValueStored[preset] - 1)
+      // Get the values we need to calculate the timing of the strumming
+      _knob = knobValue[pFactor + _it]
+      if (_knob < 32 or _knob > 96)
+        _knobSection = 2
+      else
+        _knobSection = 1
+      endif
+      // Perform the strumming
+      // NOTE: Here I do not use QuarterNote, as this is an example of what to do if we want to consider the beats per measure
+      _firstIt = 0
+      _lastIt = 3
+      if (_knob < 64)
+        _firstIt = 3
+        _lastIt = 0
+      endif
+      _delay = 0
+      _velocity = 20 * strumVelFactor[preset]
+      for _itNote = _firstIt to _lastIt
+        _note = notesOrdered[pFactor + _itNote]
+        _ch = channelOrdered[pFactor + _itNote]
+        SendMIDINoteOn _ch, _note, _velocity, (msPerSection * _knobSectionCurrent) + _delay
+        SendMIDINoteOff _ch, _note, 0, (msPerSection * _knobSectionCurrent) + (msPerSection * _knobSection) - _delay - 1
+        _delay = _delay + (5 * strumDelayFactor[preset])
+        if (_velocity <= 20 * strumVelFactor[preset])
+          _velocity = 21 * strumVelFactor[preset]
+        elseif (_velocity = 21 * strumVelFactor[preset])
+          _velocity = 40 * strumVelFactor[preset]
+        elseif (_velocity = 40 * strumVelFactor[preset])
+          _velocity = 80 * strumVelFactor[preset]
+        endif
+      endfor
+      // Advance
+      _knobSectionCurrent = _knobSectionCurrent + _knobSection
+    endfor
+  endif
+@End
+
+@OnKnobChange 
+  // Update preset Value
+  pKnobs[LastKnob + pFactor] = GetKnobValue LastKnob 
+  // Change both labels and internal values
+  updateGUI = YES
+  updateKNOB = YES
+@End
+
+@OnXYChange 
+  // Update preset value
+  pX[preset] = GetXValue 
+  pY[preset] = GetYValue 
+  // Change special parameters for the strummer:
+  // X: Strumming speed
+  // Y: Velocity
+  updateXY = YES
+@End
+
+@OnPadDown 
+  // Change the current preset, updating AU parameter
+  preset = LastPad
+  pFactor = preset * 10
+  updatePRESET = YES
+  
+  SetAUParameter 0, preset * 32
+@End
+
+@OnShiftDown 
+  // Change order mode
+  order = not order
+@End
+
+@OnAUParameter 
+  // AU parameter User0: Change the presets
+  // As User0 is 0-127, we will consider intervals of 32
+  if (LastAUParameter = 0)
+    _newPreset = RoundDown ((GetAUParameter LastAUParameter) / 32)
+    if (_newPreset >= 0 and _newPreset <= 3 and _newPreset <> preset)
+      // Change preset
+      preset = _newPreset
+      pFactor = preset * 10
+      updatePRESET = YES
+    endif
+  endif
+@End
